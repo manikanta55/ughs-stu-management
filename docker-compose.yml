@@ -1,0 +1,15 @@
+# Optional: run Postgres in Docker instead of a local install.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ughs
+      POSTGRES_PASSWORD: ughs_dev
+      POSTGRES_DB: ughs_students
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
