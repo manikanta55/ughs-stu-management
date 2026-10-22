@@ -1,72 +1,97 @@
-import { useEffect, useState } from 'react'
-import { api, type Health, type Student } from './api/client'
+import { useCallback, useEffect, useState } from 'react'
+import { api, classLabel, type SchoolClass } from './api/client'
+import { ChatPanel } from './components/ChatPanel'
+import { ClassPicker } from './components/ClassPicker'
+import { RosterPanel } from './components/RosterPanel'
+
+const SELECTED_KEY = 'ughs.selectedClassId'
+
+function storedClassId(): number | null {
+  try {
+    const v = localStorage.getItem(SELECTED_KEY)
+    return v ? Number(v) : null
+  } catch {
+    return null
+  }
+}
 
 function App() {
-  const [health, setHealth] = useState<Health | null>(null)
-  const [students, setStudents] = useState<Student[]>([])
-  const [error, setError] = useState<string | null>(null)
+  const [classes, setClasses] = useState<SchoolClass[] | null>(null)
+  const [selectedId, setSelectedId] = useState<number | null>(storedClassId)
+  const [apiError, setApiError] = useState<string | null>(null)
+  const [rosterVersion, setRosterVersion] = useState(0)
+
+  const loadClasses = useCallback(
+    () =>
+      api
+        .listClasses()
+        .then((list) => {
+          setClasses(list)
+          setApiError(null)
+          setSelectedId((id) =>
+            id !== null && list.some((c) => c.id === id) ? id : (list[0]?.id ?? null),
+          )
+        })
+        .catch((e: Error) => setApiError(e.message)),
+    [],
+  )
 
   useEffect(() => {
-    Promise.all([api.health(), api.listStudents()])
-      .then(([h, s]) => {
-        setHealth(h)
-        setStudents(s)
-      })
-      .catch((e: Error) => setError(e.message))
-  }, [])
+    void loadClasses()
+  }, [loadClasses])
+
+  useEffect(() => {
+    try {
+      if (selectedId !== null) localStorage.setItem(SELECTED_KEY, String(selectedId))
+    } catch {
+      // storage unavailable (private mode); selection just isn't remembered
+    }
+  }, [selectedId])
+
+  // After an import: refresh the roster table and the student counts in the picker.
+  const onImportFinished = useCallback(() => {
+    setRosterVersion((v) => v + 1)
+    void loadClasses()
+  }, [loadClasses])
+
+  const selected = classes?.find((c) => c.id === selectedId) ?? null
 
   return (
-    <main className="container">
-      <header>
+    <div className="app">
+      <header className="topbar">
         <h1>UGHS Student Management</h1>
-        <p className="status">
-          API:{' '}
-          {error ? (
-            <span className="bad">unreachable ({error})</span>
-          ) : health ? (
-            <span className="ok">
-              {health.status} · database {health.database}
-            </span>
-          ) : (
-            'checking…'
-          )}
-        </p>
+        {classes && (
+          <ClassPicker
+            classes={classes}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onCreated={(c) => {
+              setClasses((cs) => [...(cs ?? []), c])
+              setSelectedId(c.id)
+            }}
+          />
+        )}
       </header>
 
-      <section>
-        <h2>Students ({students.length})</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>First name</th>
-              <th>Last name</th>
-              <th>Date of birth</th>
-              <th>Parent email</th>
-            </tr>
-          </thead>
-          <tbody>
-            {students.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="empty">
-                  No students yet — roster upload comes next.
-                </td>
-              </tr>
-            ) : (
-              students.map((s) => (
-                <tr key={s.id}>
-                  <td>{s.id}</td>
-                  <td>{s.first_name}</td>
-                  <td>{s.last_name}</td>
-                  <td>{s.date_of_birth ?? '—'}</td>
-                  <td>{s.parent_email ?? '—'}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </section>
-    </main>
+      {apiError && (
+        <p className="banner-error">
+          Can't reach the API ({apiError}). Is the backend running? <code>make backend</code>
+        </p>
+      )}
+
+      {selected ? (
+        <main className="layout">
+          <ChatPanel key={selected.id} schoolClass={selected} onImportFinished={onImportFinished} />
+          <RosterPanel classId={selected.id} title={classLabel(selected)} refreshKey={rosterVersion} />
+        </main>
+      ) : (
+        classes && (
+          <main className="empty-state">
+            <p>Create a class above to start importing rosters.</p>
+          </main>
+        )
+      )}
+    </div>
   )
 }
 
